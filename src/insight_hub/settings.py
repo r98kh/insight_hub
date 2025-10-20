@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import timedelta
+import socket
 
 # Load environment variables from .env file
 load_dotenv()
@@ -44,6 +46,11 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third-party apps
     'debug_toolbar',
+    'rest_framework',
+    'rest_framework_simplejwt',
+    'drf_yasg',
+    # Local apps
+    'accounts',
 ]
 
 MIDDLEWARE = [
@@ -144,6 +151,35 @@ INTERNAL_IPS = [
     'localhost',
 ]
 
-import socket
 hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
 INTERNAL_IPS += [ip[: ip.rfind(".")] + ".1" for ip in ips]
+
+# Django REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated',
+    ),
+}
+
+# JWT
+SIMPLE_JWT = {
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=51),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
+# Swagger
+SWAGGER_SETTINGS = {
+    'DEFAULT_INFO': 'insight_hub.urls.schema_view',
+    'SECURITY_DEFINITIONS': {
+        'JWT': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header',
+            'description': 'JWT Authorization header using the Bearer scheme. Example: "Bearer <access_token>"',
+        }
+    },
+}
