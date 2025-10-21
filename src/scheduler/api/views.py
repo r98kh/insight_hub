@@ -12,16 +12,17 @@ from .serializers import (
     JobExecutionLogSerializer, AdvancedSearchSerializer
 )
 from .filtering import DynamicFilterBackend, DynamicOrderingFilter, AdvancedSearchFilter
-from permissions.views import IsOwnerOrSuperuser, JobLimitPermission
-from .pagination import SchedulePagination, ExecutionLogPagination
-from ..utils import (
-    create_periodic_task, update_periodic_task, delete_periodic_task,
-    validate_job_limits, get_user_job_statistics
-)
+from core.permissions import IsOwnerOrSuperuser, JobLimitPermission, TaskExecutionPermission
+from core.pagination import SchedulePagination, ExecutionLogPagination
+from core.mixins import OwnerOrSuperuserMixin, OptimizedQueryMixin
+from ..services import JobLimitService, JobStatisticsService, JobExecutionService
+from ..services.celery_service import CeleryTaskService
+from ..repositories import ScheduledJobRepository, JobExecutionLogRepository
 from ..tasks import execute_job_immediately
+from core.exceptions import JobLimitExceededException, TaskExecutionException
 
 
-class ScheduledJobViewSet(viewsets.ModelViewSet):
+class ScheduledJobViewSet(OwnerOrSuperuserMixin, OptimizedQueryMixin, viewsets.ModelViewSet):
     serializer_class = ScheduledJobSerializer
     permission_classes = [IsAuthenticated, JobLimitPermission]
     pagination_class = SchedulePagination
@@ -38,11 +39,10 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
         'cron_expression', 'user__username', 'user__email'
     ]
     
-    
     def get_queryset(self):
         if self.request.user.is_superuser:
-            return ScheduledJob.objects.all().select_related('user', 'task_definition')
-        return ScheduledJob.objects.filter(user=self.request.user).select_related('task_definition')
+            return ScheduledJobRepository.get_all_jobs()
+        return ScheduledJobRepository.get_user_jobs(self.request.user)
     
     def get_serializer_class(self):
         if self.action == 'create':
@@ -101,13 +101,13 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
         return super().destroy(request, *args, **kwargs)
 
     def perform_create(self, serializer):
-        is_valid, message = validate_job_limits(self.request.user, serializer.validated_data['task_definition'])
-        if not is_valid:
-            raise ValidationError({'error': message})
+        if not JobLimitService.can_create_job(self.request.user):
+            raise JobLimitExceededException()
         
         scheduled_job = serializer.save(user=self.request.user)
         try:
-            create_periodic_task(scheduled_job)
+            CeleryTaskService.create_periodic_task(scheduled_job)
+            JobLimitService.invalidate_cache(self.request.user)
         except Exception as e:
             scheduled_job.delete()
             raise ValidationError({'error': f'Failed to create scheduled task: {str(e)}'})
@@ -115,13 +115,14 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         scheduled_job = serializer.save()
         try:
-            update_periodic_task(scheduled_job)
+            CeleryTaskService.update_periodic_task(scheduled_job)
         except Exception as e:
             raise ValidationError({'error': f'Failed to update scheduled task: {str(e)}'})
     
     def perform_destroy(self, instance):
         try:
-            delete_periodic_task(instance)
+            CeleryTaskService.delete_periodic_task(instance)
+            JobLimitService.invalidate_cache(instance.user)
         except Exception:
             pass
         instance.delete()
@@ -141,7 +142,7 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
         scheduled_job = self.get_object()
         
         if not scheduled_job.can_execute():
-            raise ValidationError({'error': 'Job cannot be executed at this time'})
+            raise TaskExecutionException("Job cannot be executed at this time")
         
         try:
             custom_params = request.data if request.data else {}
@@ -154,7 +155,7 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
                 'task_id': result.id
             })
         except Exception as e:
-            raise ValidationError({'error': f'Failed to execute job: {str(e)}'})
+            raise TaskExecutionException(f'Failed to execute job: {str(e)}')
     
     @swagger_auto_schema(
         operation_summary='Pause scheduled job',
@@ -169,7 +170,8 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
         scheduled_job.save()
         
         try:
-            update_periodic_task(scheduled_job)
+            CeleryTaskService.pause_periodic_task(scheduled_job)
+            JobLimitService.invalidate_cache(scheduled_job.user)
         except Exception:
             pass
         
@@ -188,7 +190,8 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
         scheduled_job.save()
         
         try:
-            update_periodic_task(scheduled_job)
+            CeleryTaskService.resume_periodic_task(scheduled_job)
+            JobLimitService.invalidate_cache(scheduled_job.user)
         except Exception:
             pass
         
@@ -201,7 +204,7 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=['get'])
     def statistics(self, request):
-        stats = get_user_job_statistics(request.user)
+        stats = JobStatisticsService.get_user_statistics(request.user)
         return Response(stats)
     
     @swagger_auto_schema(
@@ -255,7 +258,7 @@ class ScheduledJobViewSet(viewsets.ModelViewSet):
         })
 
 
-class JobExecutionLogViewSet(viewsets.ReadOnlyModelViewSet):
+class JobExecutionLogViewSet(OwnerOrSuperuserMixin, OptimizedQueryMixin, viewsets.ReadOnlyModelViewSet):
     serializer_class = JobExecutionLogSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = ExecutionLogPagination
@@ -288,10 +291,8 @@ class JobExecutionLogViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         if self.request.user.is_superuser:
-            return JobExecutionLog.objects.all().select_related('scheduled_job__task_definition', 'scheduled_job__user')
-        return JobExecutionLog.objects.filter(
-            scheduled_job__user=self.request.user
-        ).select_related('scheduled_job__task_definition')
+            return JobExecutionLogRepository.get_all_execution_logs()
+        return JobExecutionLogRepository.get_user_execution_logs(self.request.user)
     
     @swagger_auto_schema(
         operation_summary='Advanced search for execution logs',

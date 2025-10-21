@@ -4,7 +4,7 @@ from django.db import transaction
 import logging
 
 from .models import ScheduledJob, JobExecutionLog
-from .utils import get_task_function, get_next_run_time
+from .services import TaskFunctionService, CronService, SystemStatisticsService, JobSyncService
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def execute_scheduled_job(self, scheduled_job_id):
         execution_log.mark_as_started(self.request.id)
         
         try:
-            task_function = get_task_function(scheduled_job.task_definition.function_path)
+            task_function = TaskFunctionService.get_task_function(scheduled_job.task_definition.function_path)
             result = task_function(**scheduled_job.parameters)
             
             execution_log.mark_as_completed(result)
@@ -40,7 +40,7 @@ def execute_scheduled_job(self, scheduled_job_id):
                 scheduled_job.increment_execution_count()
                 scheduled_job.reset_failure_count()
                 scheduled_job.last_run = timezone.now()
-                scheduled_job.next_run = get_next_run_time(scheduled_job.cron_expression)
+                scheduled_job.next_run = CronService.get_next_run_time(scheduled_job.cron_expression)
                 scheduled_job.save(update_fields=['execution_count', 'consecutive_failures', 'last_run', 'next_run'])
             
             logger.info(f"Successfully executed scheduled job {scheduled_job_id}")
@@ -88,11 +88,8 @@ def execute_scheduled_job(self, scheduled_job_id):
 def sync_scheduled_jobs():
 
     try:
-        from .utils import sync_all_scheduled_jobs, cleanup_orphaned_tasks
-        
-        sync_all_scheduled_jobs()
-        
-        cleanup_orphaned_tasks()
+        JobSyncService.sync_all_scheduled_jobs()
+        JobSyncService.cleanup_orphaned_tasks()
         
         logger.info("Successfully synced scheduled jobs")
         return {
@@ -112,9 +109,7 @@ def sync_scheduled_jobs():
 def health_check():
 
     try:
-        from .utils import get_job_statistics
-        
-        stats = get_job_statistics()
+        stats = SystemStatisticsService.get_job_statistics()
         
         jobs_without_task = stats.get('jobs_without_celery_task', 0)
         if jobs_without_task > 0:
