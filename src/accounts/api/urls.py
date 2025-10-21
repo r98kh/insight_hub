@@ -5,7 +5,7 @@ from rest_framework_simplejwt.views import (
 )
 from .views import RegisterUserView, UserListView
 
-app_name = 'api'
+app_name = 'accounts'
 
 urlpatterns = [
     path('', UserListView.as_view(), name='user_list'),
