@@ -13,7 +13,6 @@ class Command(BaseCommand):
         updated_count = 0
         
         for task_name, task_info in AVAILABLE_TASK_FUNCTIONS.items():
-            # Create or update TaskDefinition
             task_def, created = TaskDefinition.objects.get_or_create(
                 name=task_name.replace('_', ' ').title(),
                 defaults={
@@ -30,7 +29,6 @@ class Command(BaseCommand):
                 updated_count += 1
                 self.stdout.write(f'Updated task: {task_def.name}')
             
-            # Create TaskParameters
             for param_info in task_info['parameters']:
                 TaskParameter.objects.get_or_create(
                     task_definition=task_def,

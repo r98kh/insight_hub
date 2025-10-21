@@ -6,6 +6,7 @@ Each function should receive parameters as kwargs
 import logging
 import os
 import shutil
+import subprocess
 from datetime import datetime, timedelta
 from typing import Dict, Any
 from django.core.mail import send_mail
@@ -15,6 +16,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+HOST_BACKUP_BASE_PATH = "/backups"
 
 def send_email_task(**kwargs) -> Dict[str, Any]:
     try:
@@ -191,22 +193,22 @@ def cleanup_temp_folder_task(**kwargs) -> Dict[str, Any]:
 
 def backup_database_task(**kwargs) -> Dict[str, Any]:
     try:
-        backup_path = kwargs.get('backup_path')
+        user_path = kwargs.get('backup_path')
         backup_name = kwargs.get('backup_name', f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         compress = kwargs.get('compress', True)
-        
-        if not backup_path:
+
+        if not user_path:
             raise ValueError("backup_path parameter is required")
-        
-        os.makedirs(backup_path, exist_ok=True)
-        
-        backup_filename = f"{backup_name}.sql"
-        if compress:
-            backup_filename += ".gz"
-        
-        full_backup_path = os.path.join(backup_path, backup_filename)
-        
+
+        if not user_path.startswith(HOST_BACKUP_BASE_PATH):
+            user_path = os.path.join(HOST_BACKUP_BASE_PATH, user_path.strip('/'))
+
+        os.makedirs(user_path, exist_ok=True)
+
         db_settings = settings.DATABASES['default']
+        backup_filename = f"{backup_name}.sql.gz" if compress else f"{backup_name}.sql"
+        full_backup_path = os.path.join(user_path, backup_filename)
+
         pg_dump_cmd = [
             'pg_dump',
             '-h', db_settings['HOST'],
@@ -214,44 +216,36 @@ def backup_database_task(**kwargs) -> Dict[str, Any]:
             '-U', db_settings['USER'],
             '-d', db_settings['NAME'],
         ]
-        
         if compress:
-            pg_dump_cmd.extend(['-Z', '9'])  
-        
-        import subprocess
-        
-        with open(full_backup_path, 'w') as backup_file:
-            result = subprocess.run(
-                pg_dump_cmd,
-                stdout=backup_file,
-                stderr=subprocess.PIPE,
-                text=True,
-                env={**os.environ, 'PGPASSWORD': db_settings['PASSWORD']}
-            )
-        
+            pg_dump_cmd.extend(['-Z', '9'])
+
+        env = os.environ.copy()
+        env['PGPASSWORD'] = db_settings['PASSWORD']
+
+        with open(full_backup_path, 'wb' if compress else 'w') as backup_file:
+            result = subprocess.run(pg_dump_cmd, stdout=backup_file, stderr=subprocess.PIPE, env=env)
+
         if result.returncode != 0:
-            raise Exception(f"Error running pg_dump: {result.stderr}")
-        
+            raise Exception(f"pg_dump error: {result.stderr.decode()}")
+
         backup_size = os.path.getsize(full_backup_path)
-        
-        logger.info(f"Database backup created successfully: {full_backup_path}")
-        
+        logger.info(f"✅ Database backup created successfully: {full_backup_path}")
+
         return {
             'status': 'success',
-            'message': f'Database backup created successfully',
-            'timestamp': timezone.now().isoformat(),
+            'message': 'Database backup created successfully',
             'backup_path': full_backup_path,
             'backup_size_bytes': backup_size,
+            'timestamp': timezone.now().isoformat(),
             'compressed': compress,
-            'database_name': db_settings['NAME']
         }
-        
+
     except Exception as e:
-        logger.error(f"Error creating database backup: {str(e)}")
+        logger.error(f"❌ Error creating database backup: {e}")
         return {
             'status': 'error',
-            'message': f'Error creating database backup: {str(e)}',
-            'timestamp': timezone.now().isoformat()
+            'message': str(e),
+            'timestamp': timezone.now().isoformat(),
         }
 
 

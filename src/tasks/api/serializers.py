@@ -13,4 +13,4 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = TaskDefinition
-        fields = ['name', 'parameters']
+        fields = ['id','name', 'parameters']
