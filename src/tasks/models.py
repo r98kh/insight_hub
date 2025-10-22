@@ -33,6 +33,10 @@ class TaskDefinition(models.Model):
         verbose_name_plural = "Task Definitions"
         ordering = ['name']
         unique_together = ['name', 'function_path']
+        indexes = [
+            models.Index(fields=['is_active']),
+            models.Index(fields=['name']),
+        ]
 
 
     def get_parameters(self):
@@ -95,3 +99,7 @@ class TaskParameter(models.Model):
         verbose_name_plural = "Task Parameters"
         ordering = ['task_definition', 'parameter_name']
         unique_together = ['task_definition', 'parameter_name']
+        indexes = [
+            models.Index(fields=['task_definition', 'is_active']),
+            models.Index(fields=['parameter_name']),
+        ]

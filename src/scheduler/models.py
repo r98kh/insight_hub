@@ -84,6 +84,16 @@ class ScheduledJob(models.Model):
         default=0,
     )
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['is_active', 'status']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['last_run']),
+            models.Index(fields=['next_run']),
+            models.Index(fields=['task_definition', 'is_active']),
+        ]
+
     def get_cron_parts(self):
         parts = self.cron_expression.split()
         if len(parts) != 5:
@@ -207,6 +217,14 @@ class JobExecutionLog(models.Model):
         null=True,
         blank=True,
     )
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['scheduled_job', 'status']),
+            models.Index(fields=['execution_time']),
+            models.Index(fields=['status', 'execution_time']),
+            models.Index(fields=['scheduled_job', 'execution_time']),
+        ]
 
     def calculate_duration(self):
         if self.started_at and self.completed_at:

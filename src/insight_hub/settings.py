@@ -51,9 +51,10 @@ INSTALLED_APPS = [
     'drf_yasg',
     'django_celery_beat',
     'django_filters',
+    'django_redis',
     # Local apps
+    'core',
     'accounts',
-    'permissions',
     'tasks',
     'scheduler',
 ]
@@ -140,12 +141,16 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Custom User Model
+AUTH_USER_MODEL = 'accounts.User'
 
 
 # Django Debug Toolbar
@@ -202,6 +207,49 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60 
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_CONCURRENCY = 4
+CELERY_TASK_ALWAYS_EAGER = DEBUG
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_RESULT_EXPIRES = 3600
+CELERY_TASK_RESULT_EXPIRES = 3600
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_TASK_IGNORE_RESULT = False
+CELERY_RESULT_CACHE_MAX = 10000
+CELERY_TASK_COMPRESSION = 'gzip'
+CELERY_RESULT_COMPRESSION = 'gzip'
+CELERY_TASK_DEFAULT_RETRY_DELAY = 60
+CELERY_TASK_MAX_RETRIES = 3
+CELERY_TASK_DEFAULT_QUEUE = 'default'
+CELERY_TASK_ROUTES = {
+    'scheduler.tasks.execute_scheduled_job': {'queue': 'scheduled'},
+    'scheduler.tasks.execute_job_immediately': {'queue': 'immediate'},
+}
+CELERY_TASK_ANNOTATIONS = {
+    'scheduler.tasks.execute_scheduled_job': {'rate_limit': '10/m'},
+    'scheduler.tasks.execute_job_immediately': {'rate_limit': '30/m'},
+}
+
+# Cache Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': os.getenv('CACHE_LOCATION', 'redis://redis:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+        'KEY_PREFIX': 'insight_hub',
+        'TIMEOUT': 300,
+    }
+}
+
+# Cache settings
+CACHE_TTL = {
+    'task_definitions': 3600,
+    'user_stats': 600,
+    'active_jobs_count': 300,
+    'job_execution_logs': 1800,
+}
 
 # Email Configuration 
 
