@@ -32,8 +32,8 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 /media
-/staticfiles
-/static
+src/staticfiles
+src/static
 
 # Virtual Environment
 venv/
